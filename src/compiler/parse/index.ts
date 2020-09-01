@@ -5,11 +5,14 @@ import { reserved } from '../utils/names';
 import full_char_code_at from '../utils/full_char_code_at';
 import { TemplateNode, Ast, ParserOptions, Fragment, Style, Script } from '../interfaces';
 import error from '../utils/error';
-import { is_bracket_open, is_bracket_close, is_bracket_pair, get_bracket_close } from './utils/bracket';
-import { parse_expression_at } from './acorn';
-import { Pattern } from 'estree';
 
 type ParserState = (parser: Parser) => (ParserState | void);
+
+interface LastAutoClosedTag {
+	tag: string;
+	reason: string;
+	depth: number;
+}
 
 export class Parser {
 	readonly template: string;
@@ -23,6 +26,7 @@ export class Parser {
 	css: Style[] = [];
 	js: Script[] = [];
 	meta_tags = {};
+	last_auto_closed_tag?: LastAutoClosedTag;
 
 	constructor(template: string, options: ParserOptions) {
 		if (typeof template !== 'string') {
@@ -37,7 +41,7 @@ export class Parser {
 			start: null,
 			end: null,
 			type: 'Fragment',
-			children: [],
+			children: []
 		};
 
 		this.stack.push(this.html);
@@ -171,51 +175,6 @@ export class Parser {
 		}
 
 		return identifier;
-	}
-
-	read_destructure_pattern(): Pattern {
-		const start = this.index;
-		let i = this.index;
-
-		const code = full_char_code_at(this.template, i);
-		if (isIdentifierStart(code, true)) {
-			return { type: 'Identifier', name: this.read_identifier() };
-		}
-
-		if (!is_bracket_open(code)) {
-			this.error({
-				code: 'unexpected-token',
-				message: 'Expected identifier or destructure pattern',
-			});
-		}
-
-		const bracket_stack = [code];
-		i += code <= 0xffff ? 1 : 2;
-
-		while (i < this.template.length) {
-			const code = full_char_code_at(this.template, i);
-			if (is_bracket_open(code)) {
-				bracket_stack.push(code);
-			} else if (is_bracket_close(code)) {
-				if (!is_bracket_pair(bracket_stack[bracket_stack.length - 1], code)) {
-					this.error({
-						code: 'unexpected-token',
-						message: `Expected ${String.fromCharCode(get_bracket_close(bracket_stack[bracket_stack.length - 1]))}`
-					});
-				}
-				bracket_stack.pop();
-				if (bracket_stack.length === 0) {
-					i += code <= 0xffff ? 1 : 2;
-					break;
-				}
-			}
-			i += code <= 0xffff ? 1 : 2;
-		}
-
-		this.index = i;
-
-		const pattern_string = this.template.slice(start, i);
-		return (parse_expression_at(`(${pattern_string} = 1)`, 0) as any).left as Pattern;
 	}
 
 	read_until(pattern: RegExp) {
